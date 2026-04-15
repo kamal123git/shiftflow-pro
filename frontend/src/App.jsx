@@ -3,8 +3,8 @@ import axios from 'axios';
 import toast, { Toaster } from 'react-hot-toast';
 import io from 'socket.io-client';
 
-const API_URL = 'http://localhost:5001/api';
-const SOCKET_URL = 'http://localhost:5001';
+const API_URL = 'https://shiftflow-backend.onrender.com/api';
+const SOCKET_URL = 'https://shiftflow-backend.onrender.com';
 
 function App() {
   const [token, setToken] = useState(localStorage.getItem('token'));
