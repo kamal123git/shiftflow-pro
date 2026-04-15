@@ -440,21 +440,60 @@ function App() {
     if (window.innerWidth < 768) setMobileMenuOpen(false);
   };
 
-  const makePhoneCall = (phoneNumber) => {
-    if (!phoneNumber) {
-      toast.error('No phone number available');
-      return;
-    }
-    window.location.href = `tel:${phoneNumber}`;
-  };
+  // Replace the makePhoneCall and makeVideoCall functions with these:
 
-  const makeVideoCall = (phoneNumber) => {
-    if (!phoneNumber) {
+const makePhoneCall = (phoneNumber) => {
+  if (!phoneNumber) {
+      toast.error('No phone number available for this user');
+      return;
+  }
+  
+  // Check if on mobile device
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  
+  if (isMobile) {
+      // On mobile - open native dialer
+      window.location.href = `tel:${phoneNumber}`;
+  } else {
+      // On desktop - show the number to copy
+      toast.success(`Call ${phoneNumber} from your phone`, {
+          duration: 5000,
+          icon: '📞'
+      });
+      navigator.clipboard.writeText(phoneNumber);
+      toast.info('Phone number copied to clipboard!');
+  }
+};
+
+const makeVideoCall = (phoneNumber) => {
+  if (!phoneNumber) {
       toast.error('No phone number available');
       return;
-    }
-    window.location.href = `https://wa.me/${phoneNumber.replace(/[^0-9]/g, '')}`;
-  };
+  }
+  
+  // Clean phone number (remove spaces, dashes, etc.)
+  const cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
+  
+  // Check if on mobile device
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  
+  if (isMobile) {
+      // On mobile - try WhatsApp first
+      window.location.href = `https://wa.me/${cleanNumber}`;
+  } else {
+      // On desktop - show options
+      toast.success(`Video call options for ${phoneNumber}`, {
+          duration: 5000
+      });
+      // Show a modal with options
+      const videoOptions = confirm(`Choose video call method:\nOK - WhatsApp Web\nCancel - Google Meet`);
+      if (videoOptions) {
+          window.open(`https://web.whatsapp.com/send?phone=${cleanNumber}`, '_blank');
+      } else {
+          window.open('https://meet.google.com/new', '_blank');
+      }
+  }
+};
 
   const handleFileUpload = async (e) => {
     e.preventDefault();
