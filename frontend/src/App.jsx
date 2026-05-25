@@ -1,7 +1,9 @@
+import AIAssistant from './components/AIAssistant';
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import toast, { Toaster } from 'react-hot-toast';
 import io from 'socket.io-client';
+import EnterpriseCalendar from './components/EnterpriseCalendar';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
 const SOCKET_URL = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5001';
@@ -14,8 +16,6 @@ function App() {
   const [showForm, setShowForm] = useState(false);
   const [editingShift, setEditingShift] = useState(null);
   const [newShift, setNewShift] = useState({ date: '', start_time: '', end_time: '', required_skill: '', min_staff: 1, max_staff: 3, location: '' });
-  const [availDate, setAvailDate] = useState('');
-  const [availSlots, setAvailSlots] = useState({});
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
@@ -61,18 +61,10 @@ function App() {
   const [clockedIn, setClockedIn] = useState(false);
   const [currentTimeEntry, setCurrentTimeEntry] = useState(null);
   const [timeEntries, setTimeEntries] = useState([]);
-  const [allAvailability, setAllAvailability] = useState([]);
-
-  // Helper functions
-  function timeToMinutes(timeStr) {
-    const [hours, minutes] = timeStr.split(':').map(Number);
-    return hours * 60 + (minutes || 0);
-  }
 
   // Initialize socket connection
   useEffect(() => {
     if (token && user) {
-      console.log('Connecting to socket...');
       const newSocket = io(SOCKET_URL, {
         transports: ['websocket', 'polling'],
         reconnection: true,
@@ -81,23 +73,19 @@ function App() {
       });
       
       newSocket.on('connect', () => {
-        console.log('Socket connected!');
         setSocketConnected(true);
         newSocket.emit('user-connected', user.id);
       });
       
       newSocket.on('disconnect', () => {
-        console.log('Socket disconnected');
         setSocketConnected(false);
       });
       
       newSocket.on('online-users', (users) => {
-        console.log('Online users:', users);
         setOnlineUsers(users || []);
       });
       
       newSocket.on('new-message', (message) => {
-        console.log('New message:', message);
         setMessages(prev => [...prev, message]);
       });
       
@@ -141,13 +129,12 @@ function App() {
     await fetchShifts();
     await fetchMessages();
     await fetchDocuments();
-    await fetchUsers();
+    await fetchUsers(); // This will only fetch users if admin (check inside)
     if (user?.role === 'admin') {
       await fetchSwapRequests();
       await fetchLeaveRequests();
       await fetchStaffList();
       await fetchStats();
-      await fetchAllAvailability();
       await fetchTimeEntries();
     }
     await checkClockStatus();
@@ -175,18 +162,15 @@ function App() {
   };
 
   const fetchUsers = async () => {
+    // Only admin can fetch user list; staff will get 403, so skip if not admin
+    if (user?.role !== 'admin') return;
     try {
       const res = await axios.get(`${API_URL}/users`, { headers: { Authorization: `Bearer ${token}` } });
       setUsersList(res.data || []);
       setAllUsers(res.data || []);
-    } catch (error) { console.error('Failed to fetch users'); }
-  };
-
-  const fetchAllAvailability = async () => {
-    try {
-      const res = await axios.get(`${API_URL}/availability/all`, { headers: { Authorization: `Bearer ${token}` } });
-      setAllAvailability(res.data || []);
-    } catch (error) { console.error('Failed to fetch all availability'); }
+    } catch (error) { 
+      console.error('Failed to fetch users (ignored for staff)'); 
+    }
   };
 
   const fetchTimeEntries = async () => {
@@ -321,27 +305,6 @@ function App() {
     setShowForm(true);
   };
 
-  const submitAvailability = async (slot) => {
-    if (!availDate) {
-      toast.error('Select a date first');
-      return;
-    }
-    const key = `${availDate}_${slot.start}`;
-    const isAvailable = !availSlots[key];
-    try {
-      await axios.post(`${API_URL}/availability`, {
-        date: availDate,
-        start_time: slot.start,
-        end_time: slot.end,
-        is_available: isAvailable
-      }, { headers: { Authorization: `Bearer ${token}` } });
-      setAvailSlots({ ...availSlots, [key]: isAvailable });
-      toast.success(isAvailable ? 'Available ✓' : 'Unavailable ✗');
-    } catch (error) {
-      toast.error('Error');
-    }
-  };
-
   const runAutoSchedule = async (shiftId = null) => {
     setLoading(true);
     try {
@@ -353,17 +316,6 @@ function App() {
       toast.error(error.response?.data?.error || 'Auto-schedule failed');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const manualAssignStaff = async (shiftId, staffId) => {
-    try {
-      await axios.post(`${API_URL}/shifts/${shiftId}/assign`, { staffId }, { headers: { Authorization: `Bearer ${token}` } });
-      toast.success('Staff assigned successfully!');
-      fetchShifts();
-      fetchStats();
-    } catch (error) {
-      toast.error(error.response?.data?.error || 'Assignment failed');
     }
   };
 
@@ -449,15 +401,6 @@ function App() {
       return;
     }
     window.location.href = `tel:${phoneNumber}`;
-  };
-
-  const makeVideoCall = (phoneNumber) => {
-    if (!phoneNumber) {
-      toast.error('No phone number available');
-      return;
-    }
-    const cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
-    window.open(`https://wa.me/${cleanNumber}`, '_blank');
   };
 
   const handleFileUpload = async (e) => {
@@ -631,16 +574,13 @@ function App() {
   // Navigation items
   const navItems = [
     { id: 'dashboard', label: '📊 Dashboard', adminOnly: false },
-    { id: 'availability', label: '✅ Availability', adminOnly: false },
+    { id: 'availability', label: '📅 My Calendar', adminOnly: false },
+    { id: 'admin-availability', label: '👥 Staff Calendar', adminOnly: true },
     { id: 'chat', label: '💬 Chat', adminOnly: false },
     { id: 'documents', label: '📄 Documents', adminOnly: false },
+    { id: 'time-tracking', label: '⏰ Time Tracking', adminOnly: true },
+    { id: 'admin', label: '⚙️ Admin', adminOnly: true },
   ];
-
-  if (user?.role === 'admin') {
-    navItems.push({ id: 'admin-availability', label: '👥 Staff Availability', adminOnly: true });
-    navItems.push({ id: 'time-tracking', label: '⏰ Time Tracking', adminOnly: true });
-    navItems.push({ id: 'admin', label: '⚙️ Admin', adminOnly: true });
-  }
 
   const visibleNavItems = navItems.filter(item => !item.adminOnly || user?.role === 'admin');
 
@@ -739,7 +679,6 @@ function App() {
               </div>
             </div>
             <div className="flex items-center space-x-4">
-              {/* Online Users Indicator */}
               <div className="flex items-center space-x-2 bg-gray-100 px-3 py-1 rounded-full">
                 <span className={`w-2 h-2 rounded-full ${socketConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>
                 <span className="text-sm text-gray-600">{onlineUsers.length} online</span>
@@ -774,6 +713,7 @@ function App() {
       </nav>
 
       <main className="max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-8 pb-20 md:pb-8">
+        
         {/* Dashboard View */}
         {view === 'dashboard' && (
           <div>
@@ -809,30 +749,17 @@ function App() {
           </div>
         )}
 
-        {/* Availability View */}
+        {/* Calendar Availability View - Staff */}
         {view === 'availability' && (
-          <div className="bg-white rounded-xl p-4">
-            <h2 className="text-xl font-bold mb-4">✅ Set Your Availability</h2>
-            <div className="mb-4">
-              <label className="block text-sm mb-2">Select Date</label>
-              <input type="date" value={availDate} onChange={(e) => setAvailDate(e.target.value)} className="px-3 py-2 border rounded-lg" />
-            </div>
-            {availDate && (
-              <div className="grid grid-cols-1 gap-3">
-                {[{ start: '09:00', end: '13:00', label: 'Morning', time: '9AM-1PM' }, { start: '13:00', end: '17:00', label: 'Afternoon', time: '1PM-5PM' }, { start: '17:00', end: '21:00', label: 'Evening', time: '5PM-9PM' }].map(slot => {
-                  const isAvailable = availSlots[`${availDate}_${slot.start}`];
-                  return (
-                    <button key={slot.start} onClick={() => submitAvailability(slot)} className={`p-4 rounded-xl border-2 ${isAvailable ? 'bg-green-50 border-green-500' : 'bg-gray-50 border-gray-200'}`}>
-                      <div className="text-center">{slot.label}: {isAvailable ? '✓ Available' : '✗ Unavailable'}</div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+          <EnterpriseCalendar token={token} userId={user?.id} />
         )}
 
-        {/* Chat View - Fixed */}
+        {/* Calendar Availability View - Admin */}
+        {view === 'admin-availability' && user?.role === 'admin' && (
+          <EnterpriseCalendar token={token} isAdmin={true} />
+        )}
+
+        {/* Chat View */}
         {view === 'chat' && (
           <div className="bg-white rounded-xl shadow-sm flex flex-col h-[70vh]">
             <div className="p-3 border-b bg-gray-50 rounded-t-xl flex justify-between items-center">
@@ -890,33 +817,32 @@ function App() {
           </div>
         )}
 
-        {/* Admin Availability View */}
-        {view === 'admin-availability' && user?.role === 'admin' && (
-          <div className="bg-white rounded-xl p-4 overflow-x-auto">
-            <h2 className="text-xl font-bold mb-4">👥 Staff Availability</h2>
-            <table className="w-full min-w-[500px]">
-              <thead className="bg-gray-50"><tr><th className="p-2 text-left">Staff</th><th className="p-2 text-left">Date</th><th className="p-2 text-left">Time</th><th className="p-2 text-left">Status</th></tr></thead>
-              <tbody>
-                {allAvailability.slice(0, 20).map(avail => (
-                  <tr key={avail.id} className="border-t"><td className="p-2 text-sm">{avail.user_name}</td><td className="p-2 text-sm">{avail.date}</td><td className="p-2 text-sm">{avail.start_time}-{avail.end_time}</td><td className="p-2">{avail.is_available ? <span className="text-green-600">✅</span> : <span className="text-red-600">❌</span>}</td></tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
         {/* Time Tracking View */}
         {view === 'time-tracking' && user?.role === 'admin' && (
           <div className="bg-white rounded-xl p-4 overflow-x-auto">
             <h2 className="text-xl font-bold mb-4">⏰ Time Tracking</h2>
-            <table className="w-full min-w-[500px]">
-              <thead className="bg-gray-50"><tr><th className="p-2 text-left">Staff</th><th className="p-2 text-left">Clock In</th><th className="p-2 text-left">Duration</th><th className="p-2 text-left">Status</th></tr></thead>
-              <tbody>
-                {timeEntries.map(entry => (
-                  <tr key={entry.id} className="border-t"><td className="p-2 text-sm">{entry.user_name}</td><td className="p-2 text-sm">{new Date(entry.clock_in).toLocaleTimeString()}</td><td className="p-2 text-sm">{entry.duration ? formatDuration(entry.duration) : '—'}</td><td className="p-2">{!entry.clock_out ? <span className="text-green-600">🟢 Working</span> : <span className="text-gray-500">⚫ Completed</span>}</td></tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[500px]">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="p-2 text-left">Staff</th>
+                    <th className="p-2 text-left">Clock In</th>
+                    <th className="p-2 text-left">Duration</th>
+                    <th className="p-2 text-left">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {timeEntries.map(entry => (
+                    <tr key={entry.id} className="border-t">
+                      <td className="p-2 text-sm">{entry.user_name}</td>
+                      <td className="p-2 text-sm">{new Date(entry.clock_in).toLocaleTimeString()}</td>
+                      <td className="p-2 text-sm">{entry.duration ? formatDuration(entry.duration) : '—'}</td>
+                      <td className="p-2">{!entry.clock_out ? <span className="text-green-600">🟢 Working</span> : <span className="text-gray-500">⚫ Completed</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
@@ -935,27 +861,62 @@ function App() {
             {/* Users Table */}
             <div className="bg-white rounded-xl overflow-x-auto mb-4">
               <h3 className="font-semibold p-3 border-b">👥 Users</h3>
-              <table className="w-full min-w-[500px]">
-                <thead className="bg-gray-50"><tr><th className="p-2 text-left">Name</th><th className="p-2 text-left">Email</th><th className="p-2 text-left">Role</th><th className="p-2 text-left">Actions</th></tr></thead>
-                <tbody>
-                  {usersList.map(u => (
-                    <tr key={u.id} className="border-t"><td className="p-2 text-sm">{u.name}</td><td className="p-2 text-sm">{u.email}</td><td className="p-2"><select value={u.role} onChange={(e) => updateUserRole(u.id, e.target.value)} className="border rounded px-1 text-sm"><option value="staff">Staff</option><option value="admin">Admin</option></select></td><td className="p-2">{u.id !== user?.id && <button onClick={() => deleteUser(u.id)} className="text-red-500 text-sm">Delete</button>}</td></tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[500px]">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="p-2 text-left">Name</th>
+                      <th className="p-2 text-left">Email</th>
+                      <th className="p-2 text-left">Role</th>
+                      <th className="p-2 text-left">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {usersList.map(u => (
+                      <tr key={u.id} className="border-t">
+                        <td className="p-2 text-sm">{u.name}</td>
+                        <td className="p-2 text-sm">{u.email}</td>
+                        <td className="p-2">
+                          <select value={u.role} onChange={(e) => updateUserRole(u.id, e.target.value)} className="border rounded px-1 text-sm">
+                            <option value="staff">Staff</option>
+                            <option value="admin">Admin</option>
+                          </select>
+                        </td>
+                        <td className="p-2">
+                          {u.id !== user?.id && <button onClick={() => deleteUser(u.id)} className="text-red-500 text-sm">Delete</button>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             {/* Shifts Table */}
             <div className="bg-white rounded-xl overflow-x-auto">
               <h3 className="font-semibold p-3 border-b">📋 Shifts</h3>
-              <table className="w-full min-w-[500px]">
-                <thead className="bg-gray-50"><tr><th className="p-2 text-left">Date</th><th className="p-2 text-left">Time</th><th className="p-2 text-left">Location</th><th className="p-2 text-left">Assigned</th></tr></thead>
-                <tbody>
-                  {shifts.map(s => (
-                    <tr key={s.id} className="border-t"><td className="p-2 text-sm">{s.date}</td><td className="p-2 text-sm">{s.start_time}-{s.end_time}</td><td className="p-2 text-sm">{s.location || '-'}</td><td className="p-2 text-sm">{s.assigned_staff?.map(st => st.name).join(', ') || '-'}</td></tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[500px]">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="p-2 text-left">Date</th>
+                      <th className="p-2 text-left">Time</th>
+                      <th className="p-2 text-left">Location</th>
+                      <th className="p-2 text-left">Assigned</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {shifts.map(s => (
+                      <tr key={s.id} className="border-t">
+                        <td className="p-2 text-sm">{s.date}</td>
+                        <td className="p-2 text-sm">{s.start_time}-{s.end_time}</td>
+                        <td className="p-2 text-sm">{s.location || '-'}</td>
+                        <td className="p-2 text-sm">{s.assigned_staff?.map(st => st.name).join(', ') || '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}
@@ -1007,7 +968,7 @@ function App() {
         </div>
       )}
 
-      {showLeaveModal && (
+{showLeaveModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl p-5 w-full max-w-md">
             <h3 className="text-lg font-bold mb-3">Request Time Off</h3>
@@ -1025,6 +986,9 @@ function App() {
           </div>
         </div>
       )}
+
+      {/* AI Assistant */}
+      {token && <AIAssistant token={token} user={user} />}
     </div>
   );
 }
