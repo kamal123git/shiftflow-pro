@@ -4,6 +4,10 @@ import axios from 'axios';
 import toast, { Toaster } from 'react-hot-toast';
 import io from 'socket.io-client';
 import EnterpriseCalendar from './components/EnterpriseCalendar';
+import AcademicUnits from './components/AcademicUnits';
+import StaffProfile from './components/StaffProfile';
+import AcademicShiftManager from './components/AcademicShiftManager';
+import MyTeaching from './components/MyTeaching';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
 const SOCKET_URL = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5001';
@@ -574,7 +578,11 @@ function App() {
   // Navigation items
   const navItems = [
     { id: 'dashboard', label: '📊 Dashboard', adminOnly: false },
+    { id: 'my-teaching', label: '📚 My Teaching', adminOnly: false },
     { id: 'availability', label: '📅 My Calendar', adminOnly: false },
+    { id: 'profile', label: '👤 My Profile', adminOnly: false },
+    { id: 'units', label: '🎓 Units', adminOnly: false },
+    { id: 'academic-shifts', label: '🎓 Academic Schedule', adminOnly: true },
     { id: 'admin-availability', label: '👥 Staff Calendar', adminOnly: true },
     { id: 'chat', label: '💬 Chat', adminOnly: false },
     { id: 'documents', label: '📄 Documents', adminOnly: false },
@@ -757,6 +765,26 @@ function App() {
         {/* Calendar Availability View - Admin */}
         {view === 'admin-availability' && user?.role === 'admin' && (
           <EnterpriseCalendar token={token} isAdmin={true} />
+        )}
+        
+                {/* Profile View */}
+                {view === 'profile' && (
+          <StaffProfile token={token} user={user} onUpdate={() => {
+            // Refresh user data after profile update
+            const updatedUser = JSON.parse(localStorage.getItem('user'));
+            setUser(updatedUser);
+          }} />
+        )}
+        {view === 'my-teaching' && (
+    <MyTeaching token={token} />
+)}
+
+{view === 'academic-shifts' && user?.role === 'admin' && (
+    <AcademicShiftManager token={token} />
+)}
+        {/* Academic Units View */}
+        {view === 'units' && (
+          <AcademicUnits token={token} isAdmin={user?.role === 'admin'} />
         )}
 
         {/* Chat View */}
