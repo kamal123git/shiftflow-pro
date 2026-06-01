@@ -45,7 +45,7 @@ const units = [];
 let nextUnitId = 1;
 const courseSessions = [];
 let nextSessionId = 1;
-const staffExpertise = [];
+const staffExpertise = []; // IMPORTANT: For new users to add expertise
 
 // Predefined NAPS Units
 const defaultUnits = [
@@ -316,28 +316,6 @@ app.get('/api/staff', authenticateToken, (req, res) => {
     })));
 });
 
-app.get('/api/staff/expertise/:staffId', authenticateToken, (req, res) => {
-    const staffId = parseInt(req.params.staffId);
-    const expertise = staffExpertise.filter(e => e.staff_id === staffId);
-    res.json(expertise);
-});
-
-app.post('/api/staff/expertise', authenticateToken, (req, res) => {
-    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
-    
-    const { staff_id, unit_code, expertise_level, experience_years } = req.body;
-    
-    const existing = staffExpertise.find(e => e.staff_id === staff_id && e.unit_code === unit_code);
-    if (existing) {
-        existing.expertise_level = expertise_level;
-        existing.experience_years = experience_years;
-    } else {
-        staffExpertise.push({ staff_id, unit_code, expertise_level, experience_years });
-    }
-    
-    res.json({ message: 'Expertise added' });
-});
-
 app.put('/api/users/:id/role', authenticateToken, (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
     const userId = parseInt(req.params.id);
@@ -357,6 +335,111 @@ app.delete('/api/users/:id', authenticateToken, (req, res) => {
     res.json({ message: 'User deleted' });
 });
 
+// ============ STAFF PROFILE & EXPERTISE (FIXED FOR NEW USERS) ============
+
+// Get staff profile (works for any logged-in staff)
+app.get('/api/staff/profile', authenticateToken, async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const user = users.find(u => u.id === userId);
+        
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        
+        res.json({
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            phone: user.phone || '',
+            experience_years: user.experience_years || 0,
+            qualification: user.qualification || 'Bachelor',
+            max_hours_per_week: user.max_hours_per_week || 40,
+            role: user.role
+        });
+    } catch (error) {
+        console.error('Get profile error:', error);
+        res.status(500).json({ error: 'Failed to get profile' });
+    }
+});
+
+// Update staff profile (works for any logged-in staff)
+app.put('/api/staff/profile', authenticateToken, async (req, res) => {
+    try {
+        const { phone, experience_years, qualification, max_hours_per_week } = req.body;
+        const userId = req.user.id;
+        
+        const user = users.find(u => u.id === userId);
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        
+        if (phone !== undefined) user.phone = phone;
+        if (experience_years !== undefined) user.experience_years = experience_years;
+        if (qualification !== undefined) user.qualification = qualification;
+        if (max_hours_per_week !== undefined) user.max_hours_per_week = max_hours_per_week;
+        
+        res.json({ 
+            message: 'Profile updated successfully',
+            user: {
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                phone: user.phone,
+                experience_years: user.experience_years,
+                qualification: user.qualification,
+                max_hours_per_week: user.max_hours_per_week
+            }
+        });
+    } catch (error) {
+        console.error('Profile update error:', error);
+        res.status(500).json({ error: 'Failed to update profile' });
+    }
+});
+
+// Get staff expertise (returns empty array for new users)
+app.get('/api/staff/expertise/:staffId', authenticateToken, (req, res) => {
+    const staffId = parseInt(req.params.staffId);
+    // Allow users to see their own expertise, admin can see anyone's
+    if (req.user.id !== staffId && req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Unauthorized' });
+    }
+    const expertise = staffExpertise.filter(e => e.staff_id === staffId);
+    res.json(expertise);
+});
+
+// Add or update staff expertise (CREATES if not exists, UPDATES if exists)
+app.post('/api/staff/expertise', authenticateToken, (req, res) => {
+    const { staff_id, unit_code, expertise_level, experience_years } = req.body;
+    
+    // Allow users to update their own expertise, admin can update anyone's
+    if (req.user.id !== staff_id && req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Unauthorized' });
+    }
+    
+    // Check if expertise record exists
+    const existingIndex = staffExpertise.findIndex(e => 
+        e.staff_id === staff_id && e.unit_code === unit_code
+    );
+    
+    if (existingIndex !== -1) {
+        // UPDATE existing
+        staffExpertise[existingIndex].expertise_level = expertise_level;
+        staffExpertise[existingIndex].experience_years = experience_years;
+        res.json({ message: 'Expertise updated', expertise: staffExpertise[existingIndex] });
+    } else {
+        // CREATE new record for new user
+        const newExpertise = {
+            staff_id,
+            unit_code,
+            expertise_level,
+            experience_years
+        };
+        staffExpertise.push(newExpertise);
+        res.json({ message: 'Expertise added', expertise: newExpertise });
+    }
+});
+
 // ============ ACADEMIC UNITS & COURSES ============
 
 app.get('/api/units', authenticateToken, (req, res) => {
@@ -368,190 +451,7 @@ app.post('/api/units/init', authenticateToken, (req, res) => {
     res.json({ message: 'Units ready', units });
 });
 
-// Create course sessions (lecture + tutorials)
-app.post('/api/course-sessions', authenticateToken, (req, res) => {
-    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
-    
-    const { unit_code, lecture_day, lecture_time, tutorial_days, tutorial_times, tutorial_groups } = req.body;
-    
-    const unit = units.find(u => u.code === unit_code);
-    if (!unit) return res.status(404).json({ error: 'Unit not found' });
-    
-    const createdSessions = [];
-    
-    // Create lecture session
-    const lectureSession = {
-        id: nextSessionId++,
-        unit_code,
-        type: 'lecture',
-        day: lecture_day,
-        start_time: lecture_time,
-        end_time: addHours(lecture_time, 2),
-        staff_id: null,
-        status: 'pending',
-        createdAt: new Date().toISOString()
-    };
-    courseSessions.push(lectureSession);
-    createdSessions.push(lectureSession);
-    
-    // Create tutorial sessions
-    for (let i = 1; i <= tutorial_groups; i++) {
-        const tutorialSession = {
-            id: nextSessionId++,
-            unit_code,
-            type: 'tutorial',
-            group_number: i,
-            day: tutorial_days[i-1] || tutorial_days[0],
-            start_time: tutorial_times[i-1] || tutorial_times[0],
-            end_time: addHours(tutorial_times[i-1] || tutorial_times[0], 2),
-            staff_id: null,
-            status: 'pending',
-            createdAt: new Date().toISOString()
-        };
-        courseSessions.push(tutorialSession);
-        createdSessions.push(tutorialSession);
-    }
-    
-    res.json({ message: `Created ${createdSessions.length} sessions`, sessions: createdSessions });
-});
-
-app.get('/api/course-sessions', authenticateToken, (req, res) => {
-    const sessionsWithDetails = courseSessions.map(session => {
-        const staff = users.find(u => u.id === session.staff_id);
-        const unit = units.find(u => u.code === session.unit_code);
-        return {
-            ...session,
-            staff_name: staff?.name || 'Unassigned',
-            unit_name: unit?.name || session.unit_code
-        };
-    });
-    res.json(sessionsWithDetails);
-});
-
-// ============ ACADEMIC AUTO-SCHEDULER ============
-
-function checkAcademicAvailability(staffId, day, startTime, endTime, availabilityList) {
-    const daysMap = { 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6, 'Sunday': 0 };
-    
-    const today = new Date();
-    const currentDay = today.getDay();
-    const targetDay = daysMap[day];
-    let daysToAdd = targetDay - currentDay;
-    if (daysToAdd < 0) daysToAdd += 7;
-    
-    const targetDate = new Date(today);
-    targetDate.setDate(today.getDate() + daysToAdd);
-    const dateStr = targetDate.toISOString().split('T')[0];
-    
-    const staffAvail = availabilityList.filter(a => 
-        a.user_id === staffId && a.date === dateStr && a.is_available === true
-    );
-    
-    const startMin = timeToMinutes(startTime);
-    const endMin = timeToMinutes(endTime);
-    
-    return staffAvail.some(avail => {
-        const availStart = timeToMinutes(avail.start_time);
-        const availEnd = timeToMinutes(avail.end_time);
-        return availStart <= startMin && availEnd >= endMin;
-    });
-}
-
-app.post('/api/auto-schedule/academic', authenticateToken, async (req, res) => {
-    try {
-        if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
-        
-        const staffList = users.filter(u => u.role === 'staff');
-        const unassignedSessions = courseSessions.filter(s => s.staff_id === null);
-        const assignments = [];
-        
-        const staffHours = {};
-        staffList.forEach(s => { staffHours[s.id] = 0; });
-        
-        const staffSchedule = {};
-        staffList.forEach(s => { staffSchedule[s.id] = []; });
-        
-        for (const session of unassignedSessions) {
-            const eligibleStaff = [];
-            
-            for (const staff of staffList) {
-                const expertise = staffExpertise.find(e => 
-                    e.staff_id === staff.id && e.unit_code === session.unit_code
-                );
-                
-                if (!expertise && session.type === 'lecture') continue;
-                
-                const isAvailable = checkAcademicAvailability(staff.id, session.day, session.start_time, session.end_time, availability);
-                
-                const isBooked = staffSchedule[staff.id].some(s => 
-                    s.day === session.day && 
-                    ((s.start_time <= session.start_time && s.end_time >= session.start_time) ||
-                     (s.start_time <= session.end_time && s.end_time >= session.end_time))
-                );
-                
-                const sessionHours = 2;
-                const wouldExceed = (staffHours[staff.id] + sessionHours) > (staff.max_hours_per_week || 40);
-                
-                if (isAvailable && !isBooked && !wouldExceed) {
-                    eligibleStaff.push({
-                        ...staff,
-                        expertise_level: expertise?.expertise_level || 0,
-                        experience_years: expertise?.experience_years || staff.experience_years || 0,
-                        currentHours: staffHours[staff.id]
-                    });
-                }
-            }
-            
-            eligibleStaff.sort((a, b) => {
-                if (session.type === 'lecture') {
-                    if (a.expertise_level !== b.expertise_level) return b.expertise_level - a.expertise_level;
-                }
-                if (a.experience_years !== b.experience_years) return b.experience_years - a.experience_years;
-                return a.currentHours - b.currentHours;
-            });
-            
-            if (eligibleStaff.length > 0) {
-                const assignedStaff = eligibleStaff[0];
-                session.staff_id = assignedStaff.id;
-                session.status = 'assigned';
-                staffHours[assignedStaff.id] += 2;
-                staffSchedule[assignedStaff.id].push({
-                    day: session.day,
-                    start_time: session.start_time,
-                    end_time: session.end_time,
-                    unit: session.unit_code,
-                    type: session.type,
-                    group: session.group_number
-                });
-                
-                assignments.push({
-                    unit_code: session.unit_code,
-                    type: session.type,
-                    group: session.group_number || null,
-                    day: session.day,
-                    time: `${session.start_time}-${session.end_time}`,
-                    staff_name: assignedStaff.name,
-                    staff_id: assignedStaff.id,
-                    expertise_level: eligibleStaff[0].expertise_level,
-                    experience_years: eligibleStaff[0].experience_years
-                });
-            }
-        }
-        
-        res.json({ 
-            message: `Assigned ${assignments.length} of ${unassignedSessions.length} sessions`,
-            assignments: assignments,
-            staff_hours: staffHours,
-            unassigned_remaining: unassignedSessions.length - assignments.length
-        });
-        
-    } catch (error) {
-        console.error('Academic auto-schedule error:', error);
-        res.status(500).json({ error: 'Scheduling failed' });
-    }
-});
-
-// ============ SHIFT MANAGEMENT ============
+// ============ REGULAR SHIFTS ============
 
 app.get('/api/shifts', authenticateToken, (req, res) => {
     const shiftsWithAssignments = shifts.map(shift => {
@@ -686,7 +586,7 @@ app.get('/api/availability/staff/all', authenticateToken, (req, res) => {
     res.json(allStaff);
 });
 
-// ============ REGULAR AUTO-SCHEDULE ============
+// ============ AUTO-SCHEDULE ============
 
 app.post('/api/auto-schedule', authenticateToken, async (req, res) => {
     try {
@@ -898,8 +798,7 @@ app.get('/api/stats', authenticateToken, (req, res) => {
         pendingLeave: leaveRequests.filter(lr => lr.status === 'pending').length,
         currentlyClockedIn: currentlyClockedIn,
         totalAvailabilityRecords: availability.length,
-        academicUnits: units.length,
-        academicSessions: courseSessions.length
+        academicUnits: units.length
     });
 });
 
@@ -1004,301 +903,6 @@ app.post('/api/ai/chat', authenticateToken, async (req, res) => {
         res.status(500).json({ error: 'AI service temporarily unavailable' });
     }
 });
-// ============ STAFF PROFILE UPDATE ============
-
-// Update staff profile
-app.put('/api/staff/profile', authenticateToken, async (req, res) => {
-    try {
-        const { phone, experience_years, qualification, max_hours_per_week } = req.body;
-        const userId = req.user.id;
-        
-        const user = users.find(u => u.id === userId);
-        if (!user) {
-            return res.status(404).json({ error: 'User not found' });
-        }
-        
-        if (phone !== undefined) user.phone = phone;
-        if (experience_years !== undefined) user.experience_years = experience_years;
-        if (qualification !== undefined) user.qualification = qualification;
-        if (max_hours_per_week !== undefined) user.max_hours_per_week = max_hours_per_week;
-        
-        res.json({ 
-            message: 'Profile updated successfully',
-            user: {
-                id: user.id,
-                name: user.name,
-                email: user.email,
-                phone: user.phone,
-                experience_years: user.experience_years,
-                qualification: user.qualification,
-                max_hours_per_week: user.max_hours_per_week
-            }
-        });
-    } catch (error) {
-        console.error('Profile update error:', error);
-        res.status(500).json({ error: 'Failed to update profile' });
-    }
-});
-
-// Get staff profile
-app.get('/api/staff/profile', authenticateToken, async (req, res) => {
-    try {
-        const userId = req.user.id;
-        const user = users.find(u => u.id === userId);
-        
-        if (!user) {
-            return res.status(404).json({ error: 'User not found' });
-        }
-        
-        res.json({
-            id: user.id,
-            name: user.name,
-            email: user.email,
-            phone: user.phone || '',
-            experience_years: user.experience_years || 0,
-            qualification: user.qualification || 'Bachelor',
-            max_hours_per_week: user.max_hours_per_week || 40,
-            role: user.role
-        });
-    } catch (error) {
-        console.error('Get profile error:', error);
-        res.status(500).json({ error: 'Failed to get profile' });
-    }
-});
-// ============ ACADEMIC SHIFTS (LECTURES & TUTORIALS) ============
-
-// Create academic shift (lecture or tutorial)
-app.post('/api/academic-shifts', authenticateToken, (req, res) => {
-    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
-    
-    const { unit_code, type, date, start_time, end_time, group_number, required_expertise } = req.body;
-    
-    const unit = units.find(u => u.code === unit_code);
-    if (!unit) return res.status(404).json({ error: 'Unit not found' });
-    
-    const newShift = {
-        id: nextShiftId++,
-        shift_type: 'academic',
-        unit_code,
-        unit_name: unit.name,
-        type, // 'lecture' or 'tutorial'
-        group_number: group_number || null,
-        date,
-        start_time,
-        end_time,
-        required_expertise: required_expertise || (type === 'lecture' ? 4 : 2),
-        assigned_staff: [],
-        assigned_count: 0,
-        status: 'pending',
-        created_by: req.user.id,
-        createdAt: new Date().toISOString()
-    };
-    shifts.push(newShift);
-    res.json(newShift);
-});
-
-// Get all academic shifts grouped by unit
-app.get('/api/academic-shifts', authenticateToken, (req, res) => {
-    const academicShifts = shifts.filter(s => s.shift_type === 'academic');
-    
-    const grouped = {};
-    academicShifts.forEach(shift => {
-        if (!grouped[shift.unit_code]) {
-            grouped[shift.unit_code] = {
-                unit_code: shift.unit_code,
-                unit_name: shift.unit_name,
-                lectures: [],
-                tutorials: []
-            };
-        }
-        if (shift.type === 'lecture') {
-            grouped[shift.unit_code].lectures.push({
-                id: shift.id,
-                date: shift.date,
-                start_time: shift.start_time,
-                end_time: shift.end_time,
-                staff: shift.assigned_staff?.map(s => {
-                    const staff = users.find(u => u.id === s);
-                    return { id: staff?.id, name: staff?.name };
-                }) || [],
-                status: shift.status
-            });
-        } else {
-            grouped[shift.unit_code].tutorials.push({
-                id: shift.id,
-                group_number: shift.group_number,
-                date: shift.date,
-                start_time: shift.start_time,
-                end_time: shift.end_time,
-                staff: shift.assigned_staff?.map(s => {
-                    const staff = users.find(u => u.id === s);
-                    return { id: staff?.id, name: staff?.name };
-                }) || [],
-                status: shift.status
-            });
-        }
-    });
-    
-    res.json(Object.values(grouped));
-});
-
-// Get my teaching assignments (for staff dashboard)
-app.get('/api/my-teaching', authenticateToken, (req, res) => {
-    const userId = req.user.id;
-    const myShifts = shifts.filter(s => s.assigned_staff?.includes(userId));
-    
-    const teaching = {
-        lectures: [],
-        tutorials: []
-    };
-    
-    myShifts.forEach(shift => {
-        const item = {
-            id: shift.id,
-            unit_code: shift.unit_code,
-            unit_name: shift.unit_name,
-            date: shift.date,
-            start_time: shift.start_time,
-            end_time: shift.end_time,
-            type: shift.type,
-            group_number: shift.group_number,
-            status: shift.status
-        };
-        
-        if (shift.type === 'lecture') {
-            teaching.lectures.push(item);
-        } else {
-            teaching.tutorials.push(item);
-        }
-    });
-    
-    res.json(teaching);
-});
-
-// Academic Auto-Scheduler (assigns staff based on expertise, experience, availability)
-app.post('/api/academic-auto-schedule', authenticateToken, async (req, res) => {
-    try {
-        if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
-        
-        const academicShifts = shifts.filter(s => s.shift_type === 'academic' && s.assigned_staff?.length === 0);
-        const staffList = users.filter(u => u.role === 'staff');
-        const assignments = [];
-        
-        // Calculate current hours per staff
-        const staffHours = {};
-        staffList.forEach(s => { staffHours[s.id] = 0; });
-        
-        // Track staff schedule to avoid double-booking
-        const staffSchedule = {};
-        staffList.forEach(s => { staffSchedule[s.id] = []; });
-        
-        for (const shift of academicShifts) {
-            const eligibleStaff = [];
-            
-            for (const staff of staffList) {
-                // Check expertise
-                const expertise = staffExpertise.find(e => 
-                    e.staff_id === staff.id && e.unit_code === shift.unit_code
-                );
-                
-                const expertiseLevel = expertise?.expertise_level || 0;
-                if (expertiseLevel < shift.required_expertise) continue;
-                
-                // Check availability for this date/time
-                const isAvailable = checkAvailabilityForDateTime(staff.id, shift.date, shift.start_time, shift.end_time, availability);
-                if (!isAvailable) continue;
-                
-                // Check if already scheduled at same time
-                const isBooked = staffSchedule[staff.id].some(s => 
-                    s.date === shift.date && 
-                    ((s.start_time <= shift.start_time && s.end_time >= shift.start_time) ||
-                     (s.start_time <= shift.end_time && s.end_time >= shift.end_time))
-                );
-                if (isBooked) continue;
-                
-                // Check max hours
-                const shiftHours = calculateHours(shift.start_time, shift.end_time);
-                const wouldExceed = (staffHours[staff.id] + shiftHours) > (staff.max_hours_per_week || 40);
-                if (wouldExceed) continue;
-                
-                eligibleStaff.push({
-                    ...staff,
-                    expertise_level: expertiseLevel,
-                    experience_years: expertise?.experience_years || staff.experience_years || 0,
-                    currentHours: staffHours[staff.id],
-                    shiftHours
-                });
-            }
-            
-            // Sort: higher expertise first, then more experience, then fewer hours
-            eligibleStaff.sort((a, b) => {
-                if (a.expertise_level !== b.expertise_level) return b.expertise_level - a.expertise_level;
-                if (a.experience_years !== b.experience_years) return b.experience_years - a.experience_years;
-                return a.currentHours - b.currentHours;
-            });
-            
-            if (eligibleStaff.length > 0) {
-                const assigned = eligibleStaff[0];
-                shift.assigned_staff = [assigned.id];
-                shift.assigned_count = 1;
-                shift.status = 'assigned';
-                staffHours[assigned.id] += assigned.shiftHours;
-                staffSchedule[assigned.id].push({
-                    date: shift.date,
-                    start_time: shift.start_time,
-                    end_time: shift.end_time,
-                    unit: shift.unit_code,
-                    type: shift.type
-                });
-                
-                assignments.push({
-                    unit_code: shift.unit_code,
-                    unit_name: shift.unit_name,
-                    type: shift.type,
-                    group_number: shift.group_number,
-                    date: shift.date,
-                    time: `${shift.start_time}-${shift.end_time}`,
-                    staff_name: assigned.name,
-                    staff_id: assigned.id,
-                    expertise_level: assigned.expertise_level
-                });
-            }
-        }
-        
-        res.json({ 
-            message: `Assigned ${assignments.length} academic sessions`,
-            assignments: assignments,
-            unassigned: academicShifts.length - assignments.length
-        });
-        
-    } catch (error) {
-        console.error('Academic auto-schedule error:', error);
-        res.status(500).json({ error: 'Scheduling failed' });
-    }
-});
-
-// Helper: Check availability for a specific date and time
-function checkAvailabilityForDateTime(staffId, date, startTime, endTime, availabilityList) {
-    const staffAvail = availabilityList.filter(a => 
-        a.user_id === staffId && a.date === date && a.is_available === true
-    );
-    
-    const startMin = timeToMinutes(startTime);
-    const endMin = timeToMinutes(endTime);
-    
-    return staffAvail.some(avail => {
-        const availStart = timeToMinutes(avail.start_time);
-        const availEnd = timeToMinutes(avail.end_time);
-        return availStart <= startMin && availEnd >= endMin;
-    });
-}
-
-// Helper: Calculate hours between two times
-function calculateHours(startTime, endTime) {
-    const start = timeToMinutes(startTime);
-    const end = timeToMinutes(endTime);
-    return (end - start) / 60;
-}
 
 // ============ START SERVER ============
 

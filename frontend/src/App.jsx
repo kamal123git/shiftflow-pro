@@ -724,38 +724,102 @@ function App() {
         
         {/* Dashboard View */}
         {view === 'dashboard' && (
-          <div>
-            {user?.role === 'admin' && stats && (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-                <div className="bg-white p-4 rounded-xl shadow-sm"><p className="text-2xl font-bold text-blue-600">{stats.totalStaff}</p><p className="text-xs text-gray-500">Staff</p></div>
-                <div className="bg-white p-4 rounded-xl shadow-sm"><p className="text-2xl font-bold text-green-600">{stats.totalShifts}</p><p className="text-xs text-gray-500">Shifts</p></div>
-                <div className="bg-white p-4 rounded-xl shadow-sm"><p className="text-2xl font-bold text-emerald-600">{stats.filledShifts}</p><p className="text-xs text-gray-500">Filled</p></div>
-                <div className="bg-white p-4 rounded-xl shadow-sm"><p className="text-2xl font-bold text-orange-600">{stats.pendingSwaps}</p><p className="text-xs text-gray-500">Swaps</p></div>
-              </div>
-            )}
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold">📋 Upcoming Shifts</h2>
-              <button onClick={exportToExcel} className="bg-emerald-500 text-white px-3 py-1 rounded-lg text-sm">📊 Export</button>
+    <div>
+        {/* Welcome Banner */}
+        <div className="dashboard-welcome">
+            <div>
+                <h1>Welcome back, {user?.name}! 👋</h1>
+                <p>Here's what's happening with your schedule today.</p>
+                <div className="date">{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</div>
             </div>
-            {shifts.length > 0 ? shifts.map(shift => (
-              <div key={shift.id} className="bg-white p-4 rounded-xl shadow-sm mb-3 border-l-4 border-blue-500">
-                <div className="flex justify-between">
-                  <div>
-                    <p className="font-semibold">{shift.date} | {shift.start_time}-{shift.end_time}</p>
-                    <p className="text-sm text-gray-600">{shift.location || 'Main'} | {shift.required_skill || 'General'}</p>
-                    {shift.assigned_staff?.length > 0 && <p className="text-xs text-green-600 mt-1">✅ {shift.assigned_staff.map(s => s.name).join(', ')}</p>}
-                  </div>
-                  {user?.role === 'admin' && (
-                    <div className="flex gap-2">
-                      <button onClick={() => editShift(shift)} className="text-blue-500">✏️</button>
-                      <button onClick={() => deleteShift(shift.id)} className="text-red-500">🗑️</button>
-                    </div>
-                  )}
+        </div>
+
+        {/* Stats Cards */}
+        {user?.role === 'admin' && stats && (
+            <div className="dashboard-stats">
+                <div className="stat-card-modern">
+                    <div className="stat-icon">👥</div>
+                    <div className="stat-value">{stats.totalStaff || 0}</div>
+                    <div className="stat-label">Total Staff</div>
                 </div>
-              </div>
-            )) : <div className="bg-white p-8 text-center text-gray-400 rounded-xl">No shifts</div>}
-          </div>
+                <div className="stat-card-modern">
+                    <div className="stat-icon">📋</div>
+                    <div className="stat-value">{stats.totalShifts || 0}</div>
+                    <div className="stat-label">Total Shifts</div>
+                </div>
+                <div className="stat-card-modern">
+                    <div className="stat-icon">✅</div>
+                    <div className="stat-value">{stats.filledShifts || 0}</div>
+                    <div className="stat-label">Filled Shifts</div>
+                </div>
+                <div className="stat-card-modern">
+                    <div className="stat-icon">🔄</div>
+                    <div className="stat-value">{stats.pendingSwaps || 0}</div>
+                    <div className="stat-label">Pending Swaps</div>
+                </div>
+            </div>
         )}
+
+        {/* Quick Actions */}
+        <div className="quick-actions">
+            <h3>⚡ Quick Actions</h3>
+            <div className="quick-actions-grid">
+                <div className="quick-action-btn" onClick={() => setView('availability')}>
+                    <span className="quick-action-icon">📅</span>
+                    <span className="quick-action-text">Set Availability</span>
+                </div>
+                <div className="quick-action-btn" onClick={() => setView('chat')}>
+                    <span className="quick-action-icon">💬</span>
+                    <span className="quick-action-text">Team Chat</span>
+                </div>
+                {user?.role === 'admin' && (
+                    <div className="quick-action-btn" onClick={() => setView('admin')}>
+                        <span className="quick-action-icon">⚙️</span>
+                        <span className="quick-action-text">Admin Panel</span>
+                    </div>
+                )}
+                <div className="quick-action-btn" onClick={exportToExcel}>
+                    <span className="quick-action-icon">📊</span>
+                    <span className="quick-action-text">Export Report</span>
+                </div>
+            </div>
+        </div>
+
+        {/* Upcoming Shifts Section */}
+        <div className="recent-activity">
+            <div className="flex justify-between items-center mb-4">
+                <h3>📋 Upcoming Shifts</h3>
+                <button onClick={exportToExcel} className="text-sm text-blue-500 hover:text-blue-600 transition">Export All →</button>
+            </div>
+            {shifts.length > 0 ? (
+                <div className="activity-list">
+                    {shifts.slice(0, 5).map(shift => (
+                        <div key={shift.id} className="schedule-card schedule-card-shift">
+                            <div>
+                                <div className="schedule-time">{shift.date} • {shift.start_time} - {shift.end_time}</div>
+                                <div className="schedule-title">{shift.location || 'Main Store'}</div>
+                                <div className="schedule-subtitle">{shift.required_skill || 'General'} • Need {shift.min_staff}-{shift.max_staff} staff</div>
+                                {shift.assigned_staff?.length > 0 && (
+                                    <div className="schedule-subtitle">✅ Assigned: {shift.assigned_staff.map(s => s.name).join(', ')}</div>
+                                )}
+                            </div>
+                            <span className="schedule-status status-upcoming">Upcoming</span>
+                        </div>
+                    ))}
+                </div>
+            ) : (
+                <div className="empty-state">
+                    <div className="empty-state-icon">📋</div>
+                    <h3>No Upcoming Shifts</h3>
+                    <p>There are no shifts scheduled yet.</p>
+                    {user?.role === 'admin' && (
+                        <button onClick={() => setShowForm(true)}>+ Create Your First Shift</button>
+                    )}
+                </div>
+            )}
+        </div>
+    </div>
+)}
 
         {/* Calendar Availability View - Staff */}
         {view === 'availability' && (
